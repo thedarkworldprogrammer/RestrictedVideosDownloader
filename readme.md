@@ -16,4 +16,4 @@ If you change the webdriver variable name, make sure to change in other places t
 6. Run `python3 main.py` to start the download process.
 
 ---
-Coded by [taraglo](https://www.github.com/thedarkworldprogrammer) on GitHub
+Coded by [Himanshu](https://www.github.com/thedarkworldprogrammer) on GitHub
