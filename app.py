@@ -114,7 +114,7 @@ if is_player_mode:
                 if (v.paused) {{
                     v.play();
                 }} else {{
-                    v.pause();
+                    v.play();
                 }}
             }}
 
