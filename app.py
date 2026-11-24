@@ -4,6 +4,7 @@ import re
 import yt_dlp
 from bs4 import BeautifulSoup
 from dataclasses import dataclass
+from urllib.parse import urljoin
 
 # Page Configuration
 st.set_page_config(page_title="Video Link Extractor & Downloader", page_icon="🎬", layout="centered")
@@ -30,28 +31,27 @@ def extract_hqporner(url):
     resp = session.get(url, timeout=15)
     bs = BeautifulSoup(resp.text, 'html.parser')
 
-    # Agar 404 aaye ya "box highlight" error section dikhe, toh title se search karein (purane main.py wala logic)
+    # Agar 404 aaye ya "box highlight" error section dikhe, toh title se search karein
     if resp.status_code == 404 or bs.find_all('section', {'class': 'box highlight'}):
         slug = url.split("/")[-1].replace(".html", "")
-        # Shuru ke numbers (jaise 116280-) hata kar words nikalein
         clean_query = re.sub(r'^\d+-', '', slug).replace("_", "+").replace("-", "+")
         search_url = f"https://hqporner.com/?q={clean_query}"
         
         search_resp = session.get(search_url, timeout=15)
         search_bs = BeautifulSoup(search_resp.text, 'html.parser')
         
-        # Search results mein pehla video link dhoondhein
         result_link = search_bs.find('a', {'class': 'non-overlay'})
         if not result_link or not result_link.get('href'):
             raise Exception(f"Page 404 tha aur search mein bhi video nahi mila ({clean_query}).")
         
-        new_url = "https://hqporner.com" + result_link['href']
+        # urljoin apne aap sahi full URL bana dega
+        new_url = urljoin("https://hqporner.com/", result_link['href'])
         resp = session.get(new_url, timeout=15)
         bs = BeautifulSoup(resp.text, 'html.parser')
         url = new_url
 
     if resp.status_code != 200:
-        raise Exception(f"HQPorner page load nahi hua (Status: {resp.status_code})")
+        raise Exception(f"HQPorner page load nahi hua (Status: {resp.status_code}) -> URL: {url}")
 
     # Video title aur model nikalna
     h1 = bs.find('h1', {'class': 'main-h1'})
