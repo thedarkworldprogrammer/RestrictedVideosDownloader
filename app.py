@@ -421,6 +421,7 @@ def extract_universal_formats(url):
             height = f.get('height')
             fps = f.get('fps')
             filesize = f.get('filesize') or f.get('filesize_approx')
+            fmt_headers = f.get('http_headers', {})
 
             res_str = f"{height}p" if height else "Unknown"
             fps_str = f" {int(fps)}fps" if fps and fps > 30 else ""
@@ -430,12 +431,15 @@ def extract_universal_formats(url):
             if vcodec != 'none' and acodec != 'none':
                 formats_list.append({
                     "format_id": format_id,
+                    "height": height,
                     "label": f"{res_str}{fps_str} | .{ext} | Video + Audio ({size_str})",
                     "type": "Video + Audio",
                     "ext": ext,
                     "resolution": res_str,
                     "url": direct_url,
                     "audio_url": "",
+                    "headers": fmt_headers,
+                    "audio_headers": {},
                     "referer": url,
                     "needs_merge": False
                 })
@@ -446,24 +450,30 @@ def extract_universal_formats(url):
                     merged_id = f"{format_id}+{best_audio['format_id']}"
                     formats_list.append({
                         "format_id": merged_id,
+                        "height": height,
                         "label": f"{res_str}{fps_str} | .mp4 | Video + Audio (Merged) ({size_str}+)",
                         "type": "Video + Audio",
                         "ext": "mp4",
                         "resolution": res_str,
                         "url": direct_url,
                         "audio_url": best_audio['url'],
+                        "headers": fmt_headers,
+                        "audio_headers": best_audio.get('http_headers', {}),
                         "referer": url,
                         "needs_merge": True
                     })
 
                 formats_list.append({
                     "format_id": format_id,
+                    "height": height,
                     "label": f"{res_str}{fps_str} | .{ext} | Video Only (Mute) ({size_str})",
                     "type": "Video Only (Mute)",
                     "ext": ext,
                     "resolution": res_str,
                     "url": direct_url,
                     "audio_url": "",
+                    "headers": fmt_headers,
+                    "audio_headers": {},
                     "referer": url,
                     "needs_merge": False
                 })
@@ -474,12 +484,15 @@ def extract_universal_formats(url):
                 bitrate_str = f"{int(abr)}kbps" if abr else "Audio"
                 formats_list.append({
                     "format_id": format_id,
+                    "height": None,
                     "label": f"{bitrate_str} | .{ext} | Audio Only ({size_str})",
                     "type": "Audio Only",
                     "ext": ext,
                     "resolution": bitrate_str,
                     "url": direct_url,
                     "audio_url": "",
+                    "headers": fmt_headers,
+                    "audio_headers": {},
                     "referer": url,
                     "needs_merge": False
                 })
@@ -493,12 +506,19 @@ def extract_universal_formats(url):
             "formats": formats_list
         }
 
-def download_stream_to_file(stream_url, dest_path, referer=""):
-    """Direct stream URL ko chunks mein file par save karta hai (bina 403 block ke)"""
+def download_stream_to_file(stream_url, dest_path, custom_headers=None, referer=""):
+    """Exact yt-dlp headers aur Origin ke saath stream download karta hai"""
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+        "Accept": "*/*",
+        "Accept-Language": "en-US,en;q=0.9",
     }
-    if referer:
+    if custom_headers:
+        headers.update(custom_headers)
+    if "googlevideo.com" in stream_url:
+        headers["Origin"] = "https://www.youtube.com"
+        headers["Referer"] = "https://www.youtube.com/"
+    elif referer:
         headers["Referer"] = referer
 
     session = requests.Session(impersonate="chrome")
@@ -510,41 +530,78 @@ def download_stream_to_file(stream_url, dest_path, referer=""):
                 f.write(chunk)
 
 def fetch_video_bytes(data, selected_fmt):
-    """Direct working stream URLs se video (aur audio) download karke merge karta hai"""
+    """Direct stream URLs se download & merge karta hai, aur 403 aane par yt-dlp fallback chalta hai"""
     filename = f"{sanitize_filename(data['title'])}_{selected_fmt['resolution']}.{selected_fmt['ext']}"
     referer = selected_fmt.get("referer", "")
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        # Case 1: Video + Audio dono alag streams hain -> Download karke FFmpeg se merge karein
-        if selected_fmt.get("needs_merge") and selected_fmt.get("audio_url"):
-            vid_path = os.path.join(tmpdir, "video_stream.mp4")
-            aud_path = os.path.join(tmpdir, "audio_stream.m4a")
-            out_path = os.path.join(tmpdir, "merged_output.mp4")
+        try:
+            # Tarika 1: Direct stream URLs + Exact Headers se download
+            if selected_fmt.get("needs_merge") and selected_fmt.get("audio_url"):
+                vid_path = os.path.join(tmpdir, "video_stream.mp4")
+                aud_path = os.path.join(tmpdir, "audio_stream.m4a")
+                out_path = os.path.join(tmpdir, "merged_output.mp4")
 
-            download_stream_to_file(selected_fmt["url"], vid_path, referer)
-            download_stream_to_file(selected_fmt["audio_url"], aud_path, referer)
+                download_stream_to_file(selected_fmt["url"], vid_path, selected_fmt.get("headers"), referer)
+                download_stream_to_file(selected_fmt["audio_url"], aud_path, selected_fmt.get("audio_headers"), referer)
 
-            # FFmpeg se bina quality loss (copy) ke fast merge karein
-            cmd = [
-                "ffmpeg", "-y",
-                "-i", vid_path,
-                "-i", aud_path,
-                "-c:v", "copy",
-                "-c:a", "aac",
-                "-shortest",
-                out_path
-            ]
-            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-i", vid_path,
+                    "-i", aud_path,
+                    "-c:v", "copy",
+                    "-c:a", "aac",
+                    "-shortest",
+                    out_path
+                ]
+                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
 
-            with open(out_path, "rb") as f:
-                return f.read(), filename
+                with open(out_path, "rb") as f:
+                    return f.read(), filename
+            else:
+                single_path = os.path.join(tmpdir, f"single_output.{selected_fmt['ext']}")
+                download_stream_to_file(selected_fmt["url"], single_path, selected_fmt.get("headers"), referer)
+                with open(single_path, "rb") as f:
+                    return f.read(), filename
 
-        # Case 2: Single stream (Pre-merged, Mute Video, Audio Only, ya HQPorner)
-        else:
-            single_path = os.path.join(tmpdir, f"single_output.{selected_fmt['ext']}")
-            download_stream_to_file(selected_fmt["url"], single_path, referer)
-            with open(single_path, "rb") as f:
-                return f.read(), filename
+        except Exception as direct_err:
+            # Tarika 2 (Fallback): Agar direct URL expire ya 403 ho gaya toh yt-dlp se height-based download karein
+            if data.get("is_hqporner"):
+                raise direct_err
+
+            height = selected_fmt.get("height")
+            if selected_fmt["type"] == "Audio Only":
+                fmt_selector = "bestaudio/best"
+            elif height and selected_fmt.get("needs_merge"):
+                fmt_selector = f"bestvideo[height<={height}]+bestaudio/best[height<={height}]/best"
+            elif height:
+                fmt_selector = f"bestvideo[height<={height}]/best[height<={height}]/best"
+            else:
+                fmt_selector = "best"
+
+            out_template = os.path.join(tmpdir, "fallback_dl.%(ext)s")
+            ydl_opts = {
+                'format': fmt_selector,
+                'outtmpl': out_template,
+                'quiet': True,
+                'no_warnings': True,
+                'nocheckcertificate': True,
+            }
+            if selected_fmt.get("needs_merge"):
+                ydl_opts['merge_output_format'] = 'mp4'
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([data["source_url"]])
+
+            files = [f for f in os.listdir(tmpdir) if f.startswith("fallback_dl")]
+            if not files:
+                raise direct_err
+
+            final_path = os.path.join(tmpdir, files[0])
+            final_ext = files[0].split(".")[-1]
+            final_name = f"{sanitize_filename(data['title'])}_{selected_fmt['resolution']}.{final_ext}"
+            with open(final_path, "rb") as f:
+                return f.read(), final_name
 
 # --- UI Layout ---
 st.title("🎬 Universal Video Downloader")
