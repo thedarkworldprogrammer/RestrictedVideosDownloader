@@ -27,6 +27,26 @@ def format_filesize(size_bytes):
 def sanitize_filename(name):
     return re.sub(r'[\\/*?:"<>|]', "", name).strip()[:80] or "video"
 
+def get_ydl_opts(extra_opts=None):
+    opts = {
+        'quiet': True,
+        'no_warnings': True,
+        'noplaylist': True,
+        'nocheckcertificate': True,
+        'geo_bypass': True,
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'ios', 'web'],
+            }
+        },
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        }
+    }
+    if extra_opts:
+        opts.update(extra_opts)
+    return opts
+
 def extract_hqporner_formats(url):
     session = requests.Session(impersonate="chrome")
     resp = session.get(url, timeout=15)
@@ -99,11 +119,7 @@ def extract_universal_formats(url):
     if "hqporner.com" in url:
         return extract_hqporner_formats(url)
 
-    ydl_opts = {
-        'quiet': True,
-        'no_warnings': True,
-        'noplaylist': True,
-    }
+    ydl_opts = get_ydl_opts()
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
@@ -111,7 +127,6 @@ def extract_universal_formats(url):
         formats_list = []
         raw_formats = info.get('formats', [])
 
-        # Sabse best audio format dhoondhein (HD video ke saath merge karne ke liye)
         audio_formats = [f for f in raw_formats if f.get('vcodec') == 'none' and f.get('acodec') != 'none' and f.get('url')]
         best_audio = audio_formats[-1] if audio_formats else None
 
@@ -132,7 +147,7 @@ def extract_universal_formats(url):
             fps_str = f" {int(fps)}fps" if fps and fps > 30 else ""
             size_str = format_filesize(filesize)
 
-            # Case 1: Already Video + Audio (jaise 360p ya single-stream sites)
+            # Case 1: Already Video + Audio
             if vcodec != 'none' and acodec != 'none':
                 formats_list.append({
                     "format_id": format_id,
@@ -145,9 +160,8 @@ def extract_universal_formats(url):
                     "needs_merge": False
                 })
 
-            # Case 2: Video Only (1080p, 1440p, 4K) -> Iske liye BOTH (Video + Audio Merged) aur (Video Only Mute) options banayein
+            # Case 2: Video Only (HD/4K) -> Merged + Mute dono options
             elif vcodec != 'none' and acodec == 'none':
-                # Option A: Video + Audio (Auto-Merged with Best Audio)
                 if best_audio:
                     merged_id = f"{format_id}+{best_audio['format_id']}"
                     formats_list.append({
@@ -161,7 +175,6 @@ def extract_universal_formats(url):
                         "needs_merge": True
                     })
 
-                # Option B: Video Only (Mute)
                 formats_list.append({
                     "format_id": format_id,
                     "label": f"{res_str}{fps_str} | .{ext} | Video Only (Mute) ({size_str})",
@@ -209,15 +222,14 @@ def fetch_video_bytes(data, selected_fmt):
     else:
         with tempfile.TemporaryDirectory() as tmpdir:
             out_template = os.path.join(tmpdir, "download.%(ext)s")
-            ydl_opts = {
+            extra = {
                 'format': selected_fmt['format_id'],
                 'outtmpl': out_template,
-                'quiet': True,
-                'no_warnings': True,
             }
             if selected_fmt.get("needs_merge"):
-                ydl_opts['merge_output_format'] = 'mp4'
+                extra['merge_output_format'] = 'mp4'
 
+            ydl_opts = get_ydl_opts(extra)
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([data["source_url"]])
             
@@ -269,7 +281,6 @@ if st.session_state.video_data:
         
         f_col1, f_col2 = st.columns(2)
         with f_col1:
-            # Default mein "Video + Audio" upar rakhein taaki user ko seedha audio ke saath options dikhein
             unique_types = list(dict.fromkeys(f["type"] for f in all_formats))
             available_types = ["All"] + unique_types
             default_idx = available_types.index("Video + Audio") if "Video + Audio" in available_types else 0
