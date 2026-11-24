@@ -1,5 +1,6 @@
 import streamlit as st
 import requests
+import shutil
 import ssl
 import re
 from dataclasses import dataclass
@@ -29,10 +30,15 @@ def format_name(file_name: str) -> str:
 
 def get_firefox_driver():
     options = Options()
-    options.add_argument("--headless")  # Server par bina UI ke chalane ke liye zaroori
+    options.add_argument("--headless")
     options.set_preference("browser.privatebrowsing.autostart", True)
+    
+    # Linux server par firefox-esr ka exact path dhoondhne ke liye
+    firefox_bin = shutil.which("firefox-esr") or shutil.which("firefox")
+    if firefox_bin:
+        options.binary_location = firefox_bin
+        
     return webdriver.Firefox(options=options)
-
 def extract_video_info(urls):
     results = []
     errors = []
