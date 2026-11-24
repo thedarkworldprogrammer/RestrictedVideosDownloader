@@ -26,12 +26,32 @@ def extract_hqporner(url):
     session = requests.Session()
     session.headers.update(HEADERS)
 
-    # Step 1: HQPorner page fetch karein
+    # Step 1: Direct URL try karein
     resp = session.get(url, timeout=15)
-    if resp.status_code != 200:
-        raise Exception(f"HQPorner page block hua (Status: {resp.status_code})")
-
     bs = BeautifulSoup(resp.text, 'html.parser')
+
+    # Agar 404 aaye ya "box highlight" error section dikhe, toh title se search karein (purane main.py wala logic)
+    if resp.status_code == 404 or bs.find_all('section', {'class': 'box highlight'}):
+        slug = url.split("/")[-1].replace(".html", "")
+        # Shuru ke numbers (jaise 116280-) hata kar words nikalein
+        clean_query = re.sub(r'^\d+-', '', slug).replace("_", "+").replace("-", "+")
+        search_url = f"https://hqporner.com/?q={clean_query}"
+        
+        search_resp = session.get(search_url, timeout=15)
+        search_bs = BeautifulSoup(search_resp.text, 'html.parser')
+        
+        # Search results mein pehla video link dhoondhein
+        result_link = search_bs.find('a', {'class': 'non-overlay'})
+        if not result_link or not result_link.get('href'):
+            raise Exception(f"Page 404 tha aur search mein bhi video nahi mila ({clean_query}).")
+        
+        new_url = "https://hqporner.com" + result_link['href']
+        resp = session.get(new_url, timeout=15)
+        bs = BeautifulSoup(resp.text, 'html.parser')
+        url = new_url
+
+    if resp.status_code != 200:
+        raise Exception(f"HQPorner page load nahi hua (Status: {resp.status_code})")
 
     # Video title aur model nikalna
     h1 = bs.find('h1', {'class': 'main-h1'})
@@ -43,7 +63,6 @@ def extract_hqporner(url):
     # Step 2: mydaddy.cc iframe dhoondhna
     iframe = bs.find('iframe', {'src': re.compile(r"mydaddy\.cc")})
     if not iframe:
-        # Fallback: agar HTML mein direct link chhupa ho
         iframe_match = re.search(r'(?:https?:)?//mydaddy\.cc/video/[a-zA-Z0-9_-]+/?', resp.text)
         if not iframe_match:
             raise Exception("Video player (mydaddy.cc) nahi mila.")
@@ -54,7 +73,7 @@ def extract_hqporner(url):
     if iframe_url.startswith("//"):
         iframe_url = "https:" + iframe_url
 
-    # Step 3: Referer header ke saath mydaddy.cc player fetch karna (Sabse zaroori step)
+    # Step 3: Referer header ke saath mydaddy.cc player fetch karna
     player_headers = HEADERS.copy()
     player_headers["Referer"] = url
     player_resp = session.get(iframe_url, headers=player_headers, timeout=15)
@@ -64,17 +83,15 @@ def extract_hqporner(url):
 
     player_html = player_resp.text
 
-    # Step 4: MP4 links extract karna (1080p, 720p, ya jo bhi best mile)
+    # Step 4: MP4 links extract karna
     mp4_links = re.findall(r'(?:https?:)?//[a-zA-Z0-9./_-]+/(?:1080|720|480|360)\.mp4(?:\?[^"\'\s<>]*)?', player_html)
     
     if not mp4_links:
-        # Generic .mp4 regex fallback
         mp4_links = re.findall(r'(?:https?:)?//[a-zA-Z0-9./_-]+\.mp4(?:\?[^"\'\s<>]*)?', player_html)
 
     if not mp4_links:
-        raise Exception("Player ke andar MP4 link nahi mila (Server IP block ho sakta hai).")
+        raise Exception("Player ke andar MP4 link nahi mila (JS/Bot protection).")
 
-    # Highest resolution select karein
     best_link = mp4_links[-1]
     for q in ["1080.mp4", "720.mp4", "480.mp4"]:
         matched = [link for link in mp4_links if q in link]
