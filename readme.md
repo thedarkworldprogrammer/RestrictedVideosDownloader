@@ -17,3 +17,6 @@ If you change the webdriver variable name, make sure to change in other places t
 
 ---
 Coded by [Himanshu](https://www.github.com/thedarkworldprogrammer) on GitHub
+
+# run locally
+`streamlit run app.py`
