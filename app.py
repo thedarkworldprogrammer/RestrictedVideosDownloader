@@ -26,11 +26,10 @@ if is_player_mode:
     audio_url = query_params.get("a", "")
     video_title = query_params.get("t", "HD Stream Player")
 
-    # Streamlit ke default header/padding ko chhupane ke liye CSS
     st.markdown("""
         <style>
             #MainMenu, header, footer {visibility: hidden;}
-            .block-container {padding-top: 1rem !important; padding-bottom: 1rem !important; max-width: 1100px;}
+            .block-container {padding-top: 0.8rem !important; padding-bottom: 0.8rem !important; max-width: 1150px;}
         </style>
     """, unsafe_allow_html=True)
 
@@ -43,57 +42,124 @@ if is_player_mode:
         audio_tag = f'<audio id="aud" preload="auto"><source src="{audio_url}" type="audio/mp4"></audio>' if has_audio_track else ''
 
         custom_player_html = f"""
-        <div id="player-wrapper" style="background:#0f0f0f; border-radius:12px; overflow:hidden; box-shadow:0 8px 30px rgba(0,0,0,0.6); font-family: sans-serif; color: #fff;">
-            <!-- Video Container (Responsive, No Cropping) -->
-            <div style="position:relative; width:100%; background:#000; display:flex; justify-content:center; align-items:center;">
-                <video id="vid" style="width:100%; max-height:75vh; object-fit:contain; cursor:pointer;" autoplay playsinline>
-                    <source src="{video_url}" type="video/mp4">
-                </video>
-                {audio_tag}
-            </div>
+        <style>
+            * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+            #player-wrapper {{
+                position: relative;
+                width: 100%;
+                height: 78vh;
+                background: #000;
+                border-radius: 12px;
+                overflow: hidden;
+                box-shadow: 0 10px 35px rgba(0,0,0,0.7);
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                color: #fff;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                user-select: none;
+            }}
+            #player-wrapper:fullscreen {{
+                width: 100vw;
+                height: 100vh;
+                border-radius: 0;
+            }}
+            #vid {{
+                width: 100%;
+                height: 100%;
+                object-fit: contain;
+                cursor: pointer;
+            }}
+            #controls-bar {{
+                position: absolute;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                padding: 28px 18px 14px 18px;
+                background: linear-gradient(to top, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.6) 60%, transparent 100%);
+                opacity: 1;
+                transition: opacity 0.35s ease, transform 0.35s ease;
+                z-index: 10;
+            }}
+            #player-wrapper.hide-controls #controls-bar {{
+                opacity: 0;
+                pointer-events: none;
+                transform: translateY(8px);
+            }}
+            #player-wrapper.hide-controls #vid {{
+                cursor: none;
+            }}
+            .ctrl-btn {{
+                background: rgba(255, 255, 255, 0.14);
+                backdrop-filter: blur(4px);
+                color: #fff;
+                border: none;
+                padding: 7px 12px;
+                border-radius: 6px;
+                cursor: pointer;
+                font-size: 13px;
+                font-weight: 600;
+                transition: background 0.2s;
+            }}
+            .ctrl-btn:hover {{
+                background: rgba(255, 255, 255, 0.28);
+            }}
+            #play-btn {{
+                background: #ff4b4b;
+                padding: 7px 16px;
+            }}
+            #play-btn:hover {{
+                background: #ff3333;
+            }}
+        </style>
 
-            <!-- Custom Controls & Timeline Bar -->
-            <div style="padding: 12px 16px; background: #181818;">
+        <div id="player-wrapper">
+            <video id="vid" autoplay playsinline>
+                <source src="{video_url}" type="video/mp4">
+            </video>
+            {audio_tag}
+
+            <!-- Bottom Overlay Controls (Auto-Hide) -->
+            <div id="controls-bar">
                 <!-- Timeline Seekbar -->
                 <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
-                    <span id="curr-time" style="font-size:13px; min-width:45px;">00:00</span>
+                    <span id="curr-time" style="font-size:12px; min-width:42px; font-variant-numeric: tabular-nums;">00:00</span>
                     <input type="range" id="seekbar" value="0" min="0" max="100" step="0.1" 
-                           style="flex:1; accent-color:#ff4b4b; cursor:pointer; height:6px;">
-                    <span id="dur-time" style="font-size:13px; min-width:45px; text-align:right;">00:00</span>
+                           style="flex:1; accent-color:#ff4b4b; cursor:pointer; height:5px;">
+                    <span id="dur-time" style="font-size:12px; min-width:42px; text-align:right; font-variant-numeric: tabular-nums;">00:00</span>
                 </div>
 
                 <!-- Buttons Row -->
                 <div style="display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:10px;">
                     <div style="display:flex; align-items:center; gap:8px;">
-                        <button onclick="skip(-10)" style="background:#2a2a2a; color:#fff; border:none; padding:8px 12px; border-radius:6px; cursor:pointer; font-weight:bold;">⏪ 10s</button>
-                        <button id="play-btn" onclick="togglePlay()" style="background:#ff4b4b; color:#fff; border:none; padding:8px 16px; border-radius:6px; cursor:pointer; font-weight:bold;">⏸ Pause</button>
-                        <button onclick="skip(10)" style="background:#2a2a2a; color:#fff; border:none; padding:8px 12px; border-radius:6px; cursor:pointer; font-weight:bold;">10s ⏩</button>
+                        <button class="ctrl-btn" onclick="skip(-10)">⏪ 10s</button>
+                        <button class="ctrl-btn" id="play-btn" onclick="togglePlay()">⏸ Pause</button>
+                        <button class="ctrl-btn" onclick="skip(10)">10s ⏩</button>
                     </div>
 
                     <div style="display:flex; align-items:center; gap:12px;">
-                        <!-- Volume -->
-                        <div style="display:flex; align-items:center; gap:5px;">
+                        <div style="display:flex; align-items:center; gap:6px;">
                             <span style="font-size:14px;">🔊</span>
-                            <input type="range" id="vol-slider" min="0" max="1" step="0.05" value="1" style="width:80px; accent-color:#ff4b4b; cursor:pointer;">
+                            <input type="range" id="vol-slider" min="0" max="1" step="0.05" value="1" style="width:75px; accent-color:#ff4b4b; cursor:pointer;">
                         </div>
 
-                        <!-- Speed -->
-                        <select id="speed-select" onchange="changeSpeed(this.value)" style="background:#2a2a2a; color:#fff; border:none; padding:6px 8px; border-radius:6px; cursor:pointer;">
-                            <option value="0.75">0.75x</option>
-                            <option value="1" selected>1.0x</option>
-                            <option value="1.25">1.25x</option>
-                            <option value="1.5">1.5x</option>
-                            <option value="2">2.0x</option>
+                        <select id="speed-select" onchange="changeSpeed(this.value)" class="ctrl-btn" style="padding:6px 8px;">
+                            <option value="0.75" style="color:#000;">0.75x</option>
+                            <option value="1" selected style="color:#000;">1.0x</option>
+                            <option value="1.25" style="color:#000;">1.25x</option>
+                            <option value="1.5" style="color:#000;">1.5x</option>
+                            <option value="2" style="color:#000;">2.0x</option>
                         </select>
 
-                        <!-- Fullscreen -->
-                        <button onclick="toggleFull()" style="background:#2a2a2a; color:#fff; border:none; padding:8px 12px; border-radius:6px; cursor:pointer;">⛶ Fullscreen</button>
+                        <button class="ctrl-btn" onclick="toggleFull()">⛶ Fullscreen</button>
                     </div>
                 </div>
             </div>
         </div>
 
         <script>
+            const wrapper = document.getElementById('player-wrapper');
+            const controlsBar = document.getElementById('controls-bar');
             const v = document.getElementById('vid');
             const a = document.getElementById('aud');
             const seekbar = document.getElementById('seekbar');
@@ -101,7 +167,30 @@ if is_player_mode:
             const durTimeEl = document.getElementById('dur-time');
             const playBtn = document.getElementById('play-btn');
             const volSlider = document.getElementById('vol-slider');
-            const wrapper = document.getElementById('player-wrapper');
+
+            let hideTimeout;
+
+            function showControls() {{
+                wrapper.classList.remove('hide-controls');
+                clearTimeout(hideTimeout);
+                if (!v.paused) {{
+                    hideTimeout = setTimeout(() => {{
+                        wrapper.classList.add('hide-controls');
+                    }}, 2500);
+                }}
+            }}
+
+            // Mouse hover, movement, ya click/touch par controls dikhayein
+            wrapper.addEventListener('mousemove', showControls);
+            wrapper.addEventListener('mouseenter', showControls);
+            wrapper.addEventListener('touchstart', showControls);
+            wrapper.addEventListener('mouseleave', () => {{
+                if (!v.paused) wrapper.classList.add('hide-controls');
+            }});
+
+            // Controls bar par mouse ho toh hide na karein
+            controlsBar.addEventListener('mouseenter', () => clearTimeout(hideTimeout));
+            controlsBar.addEventListener('mouseleave', showControls);
 
             function formatTime(sec) {{
                 if (isNaN(sec)) return "00:00";
@@ -116,16 +205,19 @@ if is_player_mode:
                 }} else {{
                     v.pause();
                 }}
+                showControls();
             }}
 
             function skip(seconds) {{
                 v.currentTime = Math.max(0, Math.min(v.duration || 0, v.currentTime + seconds));
                 if (a) a.currentTime = v.currentTime;
+                showControls();
             }}
 
             function changeSpeed(rate) {{
                 v.playbackRate = parseFloat(rate);
                 if (a) a.playbackRate = parseFloat(rate);
+                showControls();
             }}
 
             function toggleFull() {{
@@ -134,21 +226,33 @@ if is_player_mode:
                 }} else {{
                     document.exitFullscreen();
                 }}
+                showControls();
             }}
 
-            v.onclick = togglePlay;
+            // Video par click karne par play/pause aur controls show
+            v.addEventListener('click', () => {{
+                togglePlay();
+            }});
+
+            // Double click par fullscreen
+            v.addEventListener('dblclick', () => {{
+                toggleFull();
+            }});
 
             v.onplay = () => {{
                 playBtn.innerText = "⏸ Pause";
                 if (a) {{
                     a.currentTime = v.currentTime;
-                    a.play().catch(e => console.log("Audio autoplay blocked:", e));
+                    a.play().catch(e => console.log(e));
                 }}
+                showControls();
             }};
 
             v.onpause = () => {{
                 playBtn.innerText = "▶️ Play";
                 if (a) a.pause();
+                wrapper.classList.remove('hide-controls');
+                clearTimeout(hideTimeout);
             }};
 
             v.onwaiting = () => {{ if (a) a.pause(); }};
@@ -161,7 +265,6 @@ if is_player_mode:
                     currTimeEl.innerText = formatTime(v.currentTime);
                     durTimeEl.innerText = formatTime(v.duration);
                 }}
-                // Drift correction agar audio 0.3s se zyada aage/peeche ho
                 if (a && Math.abs(v.currentTime - a.currentTime) > 0.3) {{
                     a.currentTime = v.currentTime;
                 }}
@@ -170,6 +273,7 @@ if is_player_mode:
             seekbar.oninput = () => {{
                 v.currentTime = seekbar.value;
                 if (a) a.currentTime = seekbar.value;
+                showControls();
             }};
 
             volSlider.oninput = () => {{
@@ -179,19 +283,21 @@ if is_player_mode:
                 }} else {{
                     v.volume = volSlider.value;
                 }}
+                showControls();
             }};
 
-            // Keyboard Shortcuts (Space, Left/Right Arrows)
             document.addEventListener('keydown', (e) => {{
                 if (e.code === 'Space') {{ e.preventDefault(); togglePlay(); }}
                 if (e.code === 'ArrowRight') skip(10);
                 if (e.code === 'ArrowLeft') skip(-10);
+                if (e.key === 'f' || e.key === 'F') toggleFull();
             }});
+
+            showControls();
         </script>
         """
-        st.components.v1.html(custom_player_html, height=720)
+        st.components.v1.html(custom_player_html, height=700)
     st.stop()
-
 
 # ==========================================
 # 2. MAIN DOWNLOADER & EXTRACTOR PAGE
