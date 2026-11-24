@@ -4,6 +4,7 @@ import re
 import os
 import tempfile
 import urllib.parse
+import subprocess
 from curl_cffi import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
@@ -492,41 +493,57 @@ def extract_universal_formats(url):
             "formats": formats_list
         }
 
-def fetch_video_bytes(data, selected_fmt):
-    filename = f"{sanitize_filename(data['title'])}_{selected_fmt['resolution']}.{selected_fmt['ext']}"
-    
-    if data.get("is_hqporner"):
-        session = requests.Session(impersonate="chrome")
-        resp = session.get(selected_fmt["url"], headers={"Referer": selected_fmt["referer"]}, timeout=120)
-        resp.raise_for_status()
-        return resp.content, filename
-    else:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            out_template = os.path.join(tmpdir, "download.%(ext)s")
-            ydl_opts = {
-                'format': selected_fmt['format_id'],
-                'outtmpl': out_template,
-                'quiet': True,
-                'no_warnings': True,
-                'nocheckcertificate': True,
-                'extractor_args': {
-                    'youtube': {
-                        'player_client': ['tv', 'web_safari', 'android', 'web'],
-                    }
-                }
-            }
-            if selected_fmt.get("needs_merge"):
-                ydl_opts['merge_output_format'] = 'mp4'
+def download_stream_to_file(stream_url, dest_path, referer=""):
+    """Direct stream URL ko chunks mein file par save karta hai (bina 403 block ke)"""
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    }
+    if referer:
+        headers["Referer"] = referer
 
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([data["source_url"]])
-            
-            downloaded_files = os.listdir(tmpdir)
-            if not downloaded_files:
-                raise Exception("File download nahi ho payi.")
-            
-            filepath = os.path.join(tmpdir, downloaded_files[0])
-            with open(filepath, "rb") as f:
+    session = requests.Session(impersonate="chrome")
+    resp = session.get(stream_url, headers=headers, stream=True, timeout=300)
+    resp.raise_for_status()
+    with open(dest_path, "wb") as f:
+        for chunk in resp.iter_content(chunk_size=1024 * 1024):
+            if chunk:
+                f.write(chunk)
+
+def fetch_video_bytes(data, selected_fmt):
+    """Direct working stream URLs se video (aur audio) download karke merge karta hai"""
+    filename = f"{sanitize_filename(data['title'])}_{selected_fmt['resolution']}.{selected_fmt['ext']}"
+    referer = selected_fmt.get("referer", "")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Case 1: Video + Audio dono alag streams hain -> Download karke FFmpeg se merge karein
+        if selected_fmt.get("needs_merge") and selected_fmt.get("audio_url"):
+            vid_path = os.path.join(tmpdir, "video_stream.mp4")
+            aud_path = os.path.join(tmpdir, "audio_stream.m4a")
+            out_path = os.path.join(tmpdir, "merged_output.mp4")
+
+            download_stream_to_file(selected_fmt["url"], vid_path, referer)
+            download_stream_to_file(selected_fmt["audio_url"], aud_path, referer)
+
+            # FFmpeg se bina quality loss (copy) ke fast merge karein
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", vid_path,
+                "-i", aud_path,
+                "-c:v", "copy",
+                "-c:a", "aac",
+                "-shortest",
+                out_path
+            ]
+            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+
+            with open(out_path, "rb") as f:
+                return f.read(), filename
+
+        # Case 2: Single stream (Pre-merged, Mute Video, Audio Only, ya HQPorner)
+        else:
+            single_path = os.path.join(tmpdir, f"single_output.{selected_fmt['ext']}")
+            download_stream_to_file(selected_fmt["url"], single_path, referer)
+            with open(single_path, "rb") as f:
                 return f.read(), filename
 
 # --- UI Layout ---
