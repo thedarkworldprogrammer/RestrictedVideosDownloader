@@ -1,9 +1,18 @@
 import streamlit as st
+import requests
+import re
 import yt_dlp
+from bs4 import BeautifulSoup
 from dataclasses import dataclass
 
 # Page Configuration
 st.set_page_config(page_title="Video Link Extractor & Downloader", page_icon="🎬", layout="centered")
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.5",
+}
 
 @dataclass
 class VideoResult:
@@ -13,52 +22,89 @@ class VideoResult:
     resolution: str
     source_url: str
 
-def extract_with_ytdlp(urls):
-    results = []
-    errors = []
+def extract_hqporner(url):
+    session = requests.Session()
+    session.headers.update(HEADERS)
 
+    # Step 1: HQPorner page fetch karein
+    resp = session.get(url, timeout=15)
+    if resp.status_code != 200:
+        raise Exception(f"HQPorner page block hua (Status: {resp.status_code})")
+
+    bs = BeautifulSoup(resp.text, 'html.parser')
+
+    # Video title aur model nikalna
+    h1 = bs.find('h1', {'class': 'main-h1'})
+    title = h1.get_text().strip() if h1 else "HQPorner Video"
+
+    star_li = bs.find('li', {'class': 'icon fa-star-o'})
+    uploader = star_li.get_text().replace("featuring ", "").replace(",", " and").strip() if star_li else "Unknown"
+
+    # Step 2: mydaddy.cc iframe dhoondhna
+    iframe = bs.find('iframe', {'src': re.compile(r"mydaddy\.cc")})
+    if not iframe:
+        # Fallback: agar HTML mein direct link chhupa ho
+        iframe_match = re.search(r'(?:https?:)?//mydaddy\.cc/video/[a-zA-Z0-9_-]+/?', resp.text)
+        if not iframe_match:
+            raise Exception("Video player (mydaddy.cc) nahi mila.")
+        iframe_url = iframe_match.group(0)
+    else:
+        iframe_url = iframe['src']
+
+    if iframe_url.startswith("//"):
+        iframe_url = "https:" + iframe_url
+
+    # Step 3: Referer header ke saath mydaddy.cc player fetch karna (Sabse zaroori step)
+    player_headers = HEADERS.copy()
+    player_headers["Referer"] = url
+    player_resp = session.get(iframe_url, headers=player_headers, timeout=15)
+    
+    if player_resp.status_code != 200:
+        raise Exception(f"Player load nahi hua (Status: {player_resp.status_code})")
+
+    player_html = player_resp.text
+
+    # Step 4: MP4 links extract karna (1080p, 720p, ya jo bhi best mile)
+    mp4_links = re.findall(r'(?:https?:)?//[a-zA-Z0-9./_-]+/(?:1080|720|480|360)\.mp4(?:\?[^"\'\s<>]*)?', player_html)
+    
+    if not mp4_links:
+        # Generic .mp4 regex fallback
+        mp4_links = re.findall(r'(?:https?:)?//[a-zA-Z0-9./_-]+\.mp4(?:\?[^"\'\s<>]*)?', player_html)
+
+    if not mp4_links:
+        raise Exception("Player ke andar MP4 link nahi mila (Server IP block ho sakta hai).")
+
+    # Highest resolution select karein
+    best_link = mp4_links[-1]
+    for q in ["1080.mp4", "720.mp4", "480.mp4"]:
+        matched = [link for link in mp4_links if q in link]
+        if matched:
+            best_link = matched[0]
+            break
+
+    if best_link.startswith("//"):
+        best_link = "https:" + best_link
+
+    res = "1080p" if "1080" in best_link else ("720p" if "720" in best_link else "HD")
+    return VideoResult(title, uploader, best_link, res, url)
+
+def extract_generic_ytdlp(url):
     ydl_opts = {
         'quiet': True,
         'no_warnings': True,
-        'format': 'best[ext=mp4]/best',  # Best MP4 quality select karne ke liye
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-            'Referer': 'https://hqporner.com/'
-        }
+        'format': 'best[ext=mp4]/best',
+        'http_headers': HEADERS
     }
-
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        for idx, url in enumerate(urls):
-            url = url.strip()
-            if not url:
-                continue
-
-            status_text.text(f"Extracting ({idx + 1}/{len(urls)}): {url}")
-
-            try:
-                info = ydl.extract_info(url, download=False)
-                
-                title = info.get('title', 'Video')
-                uploader = info.get('uploader') or info.get('creator') or "Unknown"
-                download_url = info.get('url')
-                height = info.get('height')
-                resolution = f"{height}p" if height else "HD"
-
-                if not download_url:
-                    raise Exception("Direct MP4 URL extract nahi ho paya (Cloud IP block ho sakta hai).")
-
-                results.append(VideoResult(title, uploader, download_url, resolution, url))
-
-            except Exception as e:
-                errors.append(f"{url} -> Error: {str(e)}")
-
-            progress_bar.progress((idx + 1) / len(urls))
-
-    status_text.text("Process Complete!")
-    return results, errors
+        info = ydl.extract_info(url, download=False)
+        title = info.get('title', 'Video')
+        uploader = info.get('uploader') or "Unknown"
+        download_url = info.get('url')
+        height = info.get('height')
+        resolution = f"{height}p" if height else "HD"
+        if not download_url:
+            raise Exception("Direct MP4 URL nahi mila.")
+        return VideoResult(title, uploader, download_url, resolution, url)
 
 # --- UI Layout ---
 st.title("🎬 Video Downloader Web App")
@@ -72,21 +118,135 @@ if st.button("Extract Videos", type="primary"):
     if not url_list:
         st.warning("Kripya kam se kam ek URL enter karein.")
     else:
-        with st.spinner("Links extract kiye ja rahe hain..."):
-            extracted_videos, failed_urls = extract_with_ytdlp(url_list)
+        results = []
+        errors = []
+        progress_bar = st.progress(0)
+        status_text = st.empty()
 
-        if extracted_videos:
-            st.success(f"{len(extracted_videos)} videos ready hain!")
-            for vid in extracted_videos:
+        with st.spinner("Links extract kiye ja rahe hain..."):
+            for idx, url in enumerate(url_list):
+                status_text.text(f"Processing ({idx + 1}/{len(url_list)}): {url}")
+                try:
+                    if "hqporner.com" in url:
+                        vid = extract_hqporner(url)
+                    else:
+                        vid = extract_generic_ytdlp(url)
+                    results.append(vid)
+                except Exception as e:
+                    errors.append(f"{url} -> Error: {str(e)}")
+                progress_bar.progress((idx + 1) / len(url_list))
+
+        status_text.text("Process Complete!")
+
+        if results:
+            st.success(f"{len(results)} videos ready hain!")
+            for vid in results:
                 with st.container(border=True):
                     st.subheader(vid.title)
-                    st.caption(f"Uploader/Model: {vid.uploader} | Quality: {vid.resolution}")
+                    st.caption(f"Model: {vid.uploader} | Quality: {vid.resolution}")
                     st.link_button(f"⬇️ Download MP4 ({vid.resolution})", vid.download_url)
 
-        if failed_urls:
+        if errors:
             st.error("Kuch links fail ho gaye:")
-            for err in failed_urls:
+            for err in errors:
                 st.write(f"- {err}")
+
+
+
+
+
+
+
+
+# import streamlit as st
+# import yt_dlp
+# from dataclasses import dataclass
+
+# # Page Configuration
+# st.set_page_config(page_title="Video Link Extractor & Downloader", page_icon="🎬", layout="centered")
+
+# @dataclass
+# class VideoResult:
+#     title: str
+#     uploader: str
+#     download_url: str
+#     resolution: str
+#     source_url: str
+
+# def extract_with_ytdlp(urls):
+#     results = []
+#     errors = []
+
+#     ydl_opts = {
+#         'quiet': True,
+#         'no_warnings': True,
+#         'format': 'best[ext=mp4]/best',  # Best MP4 quality select karne ke liye
+#         'http_headers': {
+#             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+#             'Referer': 'https://hqporner.com/'
+#         }
+#     }
+
+#     progress_bar = st.progress(0)
+#     status_text = st.empty()
+
+#     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+#         for idx, url in enumerate(urls):
+#             url = url.strip()
+#             if not url:
+#                 continue
+
+#             status_text.text(f"Extracting ({idx + 1}/{len(urls)}): {url}")
+
+#             try:
+#                 info = ydl.extract_info(url, download=False)
+                
+#                 title = info.get('title', 'Video')
+#                 uploader = info.get('uploader') or info.get('creator') or "Unknown"
+#                 download_url = info.get('url')
+#                 height = info.get('height')
+#                 resolution = f"{height}p" if height else "HD"
+
+#                 if not download_url:
+#                     raise Exception("Direct MP4 URL extract nahi ho paya (Cloud IP block ho sakta hai).")
+
+#                 results.append(VideoResult(title, uploader, download_url, resolution, url))
+
+#             except Exception as e:
+#                 errors.append(f"{url} -> Error: {str(e)}")
+
+#             progress_bar.progress((idx + 1) / len(urls))
+
+#     status_text.text("Process Complete!")
+#     return results, errors
+
+# # --- UI Layout ---
+# st.title("🎬 Video Downloader Web App")
+# st.write("Neeche diye gaye box mein video URLs paste karein (har line mein ek URL).")
+
+# urls_input = st.text_area("Video URLs:", height=150, placeholder="https://hqporner.com/hdporn/...\nhttps://www.eporner.com/...")
+
+# if st.button("Extract Videos", type="primary"):
+#     url_list = [line.strip() for line in urls_input.split("\n") if line.strip()]
+    
+#     if not url_list:
+#         st.warning("Kripya kam se kam ek URL enter karein.")
+#     else:
+#         with st.spinner("Links extract kiye ja rahe hain..."):
+#             extracted_videos, failed_urls = extract_with_ytdlp(url_list)
+
+#         if extracted_videos:
+#             st.success(f"{len(extracted_videos)} videos ready hain!")
+#             for vid in extracted_videos:
+#                 with st.container(border=True):
+#                     st.subheader(vid.title)
+#                     st.caption(f"Uploader/Model: {vid.uploader} | Quality: {vid.resolution}")
+#                     st.link_button(f"⬇️ Download MP4 ({vid.resolution})", vid.download_url)
+
+#         if failed_urls:
+#             st.error("Kuch links fail ho gaye:")
+#             for err in failed_urls:
+#                 st.write(f"- {err}")
 
 
 
