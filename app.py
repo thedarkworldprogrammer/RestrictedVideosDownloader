@@ -18,15 +18,14 @@ class VideoResult:
     source_url: str
 
 def extract_hqporner(url):
-    # impersonate="chrome" asli Chrome browser ka TLS fingerprint bhejta hai
     session = requests.Session(impersonate="chrome")
 
-    # Step 1: HQPorner page fetch karein
+    # Step 1: Direct URL try karein
     resp = session.get(url, timeout=15)
     bs = BeautifulSoup(resp.text, 'html.parser')
 
     # Agar 404 aaye toh title se search karein
-    if resp.status_code == 404 or bs.find_all('section', {'class': 'box highlight'}):
+    if resp.status_code == 404 or "Oops, page not found!" in resp.text or bs.find_all('section', {'class': 'box highlight'}):
         slug = url.split("/")[-1].replace(".html", "")
         clean_query = re.sub(r'^\d+-', '', slug).replace("_", "+").replace("-", "+")
         search_url = f"https://hqporner.com/?q={clean_query}"
@@ -34,11 +33,12 @@ def extract_hqporner(url):
         search_resp = session.get(search_url, timeout=15)
         search_bs = BeautifulSoup(search_resp.text, 'html.parser')
         
-        result_link = search_bs.find('a', {'class': 'non-overlay'})
-        if not result_link or not result_link.get('href'):
-            raise Exception(f"Search mein bhi video nahi mila ({clean_query}).")
+        # Sirf wahi link uthayein jiske href mein '/hdporn/' ho
+        video_links = search_bs.find_all('a', href=re.compile(r'/hdporn/\d+-'))
+        if not video_links:
+            raise Exception(f"Video delete ho chuka hai, search mein bhi nahi mila ({clean_query}).")
         
-        new_url = urljoin("https://hqporner.com/", result_link['href'])
+        new_url = urljoin("https://hqporner.com/", video_links[0]['href'])
         resp = session.get(new_url, timeout=15)
         bs = BeautifulSoup(resp.text, 'html.parser')
         url = new_url
