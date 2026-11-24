@@ -1,7 +1,7 @@
-# HQporner and Eporner Bulk Video Downloader
+# Honer and Ener Bulk Video Downloader
 
 ### Introduction
-The python script in `main.py` downloads multiple videos concurrently from [hqporner.com](https://hqporner.com) and [eporner.com](https://www.eporner.com).
+The python script in `main.py` downloads multiple videos concurrently from [honer.com](https://qoner.com) and [eoer.com](https://www.eonr.com).
 The program is built using asyncio, aiohttp and selenium with Firefox webdriver. If you wish to change the browser, update configurations from `line 84` to `line 92` in `main.py`.
 If you change the webdriver variable name, make sure to change in other places throughout the code.
 
@@ -16,4 +16,4 @@ If you change the webdriver variable name, make sure to change in other places t
 6. Run `python3 main.py` to start the download process.
 
 ---
-Coded by [taraglo](https://www.github.com/taraglo) on GitHub
+Coded by [taraglo](https://www.github.com/thedarkworldprogrammer) on GitHub
