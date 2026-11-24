@@ -111,8 +111,8 @@ if is_player_mode:
             }}
 
             function togglePlay() {{
-                if (v.play) {{
-                    v.paused();
+                if (v.paused) {{
+                    v.play();
                 }} else {{
                     v.pause();
                 }}
